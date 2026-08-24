@@ -1,0 +1,103 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper function to check if user is the authorized admin
+    function isAuthorizedAdmin() {
+      return request.auth != null && request.auth.uid in [
+        'Vr7TgxtFJVfWHd6Nhjtl8eLM2ok2',
+        'tonzSg6CaVZqci92PrHqxJ41tpo2'
+        // Add more admin UIDs here as needed
+      ];
+    }
+    
+    // Profile pictures - users can upload/update their own profile pictures
+    // Admins can upload/update profile pictures for any user
+    match /profile-pictures/{userId}/{fileName} {
+      // Allow read access to all authenticated users (for displaying profile pics)
+      allow read: if request.auth != null;
+      
+      // Write access (create/update):
+      // - Users can write to their own profile picture path (when request.auth.uid == userId)
+      // - Admins can write to any user's profile picture path (any userId)
+      allow write: if request.auth != null && (
+        isAuthorizedAdmin() || 
+        request.auth.uid == userId
+      );
+      
+      // Delete access:
+      // - Users can delete their own profile picture (when request.auth.uid == userId)
+      // - Admins can delete any user's profile picture (any userId)
+      allow delete: if request.auth != null && (
+        isAuthorizedAdmin() || 
+        request.auth.uid == userId
+      );
+    }
+    
+    // Temporary uploads path (fallback) - only admins can upload here
+    match /profile-pictures/temp/{fileName} {
+      // Allow read access to all authenticated users
+      allow read: if request.auth != null;
+      
+      // Allow write access only to authorized admins
+      allow write: if isAuthorizedAdmin();
+      
+      // Allow delete only to authorized admins
+      allow delete: if isAuthorizedAdmin();
+    }
+
+    // Dealers uploads: allow users to upload files under their own UID folder
+    // and allow admins full accessh. Example path: /dealers/{uid}/filename.pdf
+    match /dealers/{dealerId}/{fileName} {
+      // Allow read access to authenticated users so files can be displayed in app
+      allow read: if request.auth != null;
+
+      // Allow write (create/update) if the user is the owner (dealerId == uid) or an admin
+      allow write: if request.auth != null && (
+        isAuthorizedAdmin() || request.auth.uid == dealerId
+      );
+
+      // Allow delete if the user is the owner (dealerId == uid) or an admin
+      allow delete: if request.auth != null && (
+        isAuthorizedAdmin() || request.auth.uid == dealerId
+      );
+    }
+
+    // Admin-only temporary deposits for dealers
+    match /dealers/temp/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if isAuthorizedAdmin();
+      allow delete: if isAuthorizedAdmin();
+    }
+
+    // Brands uploads: allow users to upload brand logos under their own UID folder
+    // and allow admins full access. Example path: /brands/{uid}/brand-logo-*.jpg
+    match /brands/{userId}/{fileName} {
+      // Allow read access to authenticated users so brand logos can be displayed in app
+      allow read: if request.auth != null;
+
+      // Allow write (create/update) if the user is the owner (userId == uid) or an admin
+      allow write: if request.auth != null && (
+        isAuthorizedAdmin() || request.auth.uid == userId
+      );
+
+      // Allow delete if the user is the owner (userId == uid) or an admin
+      allow delete: if request.auth != null && (
+        isAuthorizedAdmin() || request.auth.uid == userId
+      );
+    }
+
+    // Admin-only temporary deposits for brands
+    match /brands/temp/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if isAuthorizedAdmin();
+      allow delete: if isAuthorizedAdmin();
+    }
+    
+    // Default deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+

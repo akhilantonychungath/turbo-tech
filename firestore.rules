@@ -1,0 +1,86 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Admin UIDs (update as needed)
+    function isAuthorizedAdmin() {
+      return request.auth != null &&
+             request.auth.uid in [
+               'Vr7TgxtFJVfWHd6Nhjtl8eLM2ok2',
+               'tonzSg6CaVZqci92PrHqxJ41tpo2'
+             ];
+    }
+
+    // Safe getter for the current user's document
+    function getUserDoc() {
+      return request.auth != null
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid))
+        : null;
+    }
+
+    // Valid active user (admin OR existing user not blocked and not pending)
+    function hasValidUserStatus() {
+      return isAuthorizedAdmin() ||
+             (request.auth != null &&
+              getUserDoc() != null &&
+              getUserDoc().exists &&
+              !getUserDoc().data.isBlocked &&
+              getUserDoc().data.status != 'pending');
+    }
+
+    // Field checks using keys() helpers
+    function isSettingRestrictedFields() {
+      // On create the request contains the full document; on update check only changed keys.
+      return resource == null
+        ? request.resource.data.keys().hasAny([
+            'isBlocked', 'status', 'userRoleId', 'roleName'
+          ])
+        : request.resource.data.diff(resource.data).changedKeys().hasAny([
+            'isBlocked', 'status', 'userRoleId', 'roleName'
+          ]);
+    }
+
+    function isOnlyUpdatingProfileFields() {
+      // Consider only the keys that were actually changed during an update.
+      return request.resource.data.diff(resource.data).changedKeys().hasOnly([
+        'email', 'name', 'profilePicUrl', 'updatedAt'
+      ]);
+    }
+
+    // Reusable check for standard collections
+    function canAccessCollection() {
+      return request.auth != null && (isAuthorizedAdmin() || hasValidUserStatus());
+    }
+
+    // users collection: tighter rules and explicit profile-field allowance
+    match /users/{userId} {
+      allow read:   if request.auth != null && (isAuthorizedAdmin() || request.auth.uid == userId);
+      allow create: if request.auth != null &&
+                     (isAuthorizedAdmin() || (request.auth.uid == userId && !isSettingRestrictedFields()));
+      allow update: if request.auth != null &&
+                     (isAuthorizedAdmin() ||
+                       (request.auth.uid == userId &&
+                         (isOnlyUpdatingProfileFields() ||
+                           (!isSettingRestrictedFields() && hasValidUserStatus())
+                         )
+                       )
+                     );
+      allow delete: if isAuthorizedAdmin();
+    }
+
+    // Group common collections to avoid repetition — use a generic path
+    match /{collection}/{docId} {
+      allow read, create, update: if collection in [
+        'companies', 'dealers', 'userRoles', 'userPages', 'services', 'brands'
+      ] && canAccessCollection();
+      allow delete: if collection in [
+        'companies', 'dealers', 'userRoles', 'userPages', 'services', 'brands'
+      ] && isAuthorizedAdmin();
+    }
+
+    // Deny everything else explicitly
+    match /{document=**} {
+      allow read, create, update, delete: if false;
+    }
+  }
+}
